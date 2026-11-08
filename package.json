@@ -1,6 +1,6 @@
 {
   "name": "tv-launcher",
-  "version": "0.0.1",
+  "version": "0.1.0-dev",
   "description": "A fast custom launcher for Samsung Tizen TVs, packaged as a TizenBrew app module.",
   "packageType": "app",
   "appName": "TV Launcher",
