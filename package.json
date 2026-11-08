@@ -1,0 +1,17 @@
+{
+  "name": "tv-launcher",
+  "version": "0.0.1",
+  "description": "A fast custom launcher for Samsung Tizen TVs, packaged as a TizenBrew app module.",
+  "packageType": "app",
+  "appName": "TV Launcher",
+  "appPath": "app/index.html",
+  "keys": [
+    "ColorF0Red",
+    "ColorF1Green",
+    "ColorF2Yellow",
+    "ColorF3Blue",
+    "MediaPlayPause",
+    "Info"
+  ],
+  "license": "MIT"
+}
