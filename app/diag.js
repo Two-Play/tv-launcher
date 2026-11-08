@@ -1,105 +1,81 @@
-// Diagnostics page: reports which Tizen/Samsung APIs this module can use on the TV.
-// Written in ES5 so it runs on older Tizen web engines.
+// Diagnostics page (v0.0.2). The page itself has NO tizen access (served over http),
+// so it asks the module's privileged service on 127.0.0.1:8095 instead.
 (function () {
   var out = document.getElementById('out');
+  var SERVICE = 'http://127.0.0.1:8095';
+  var YT_ID = '111299001912'; // common Samsung YouTube app id; test target
 
   function row(name, ok, detail) {
     var tr = document.createElement('tr');
-    var cls = ok === true ? 'ok' : ok === false ? 'no' : '';
-    var mark = ok === true ? '✔ ' : ok === false ? '✘ ' : '';
-    tr.innerHTML = '<td></td><td class="' + cls + '"></td>';
+    tr.innerHTML = '<td></td><td></td>';
     tr.children[0].textContent = name;
-    tr.children[1].textContent = mark + (detail || '');
+    tr.children[1].className = ok === true ? 'ok' : ok === false ? 'no' : '';
+    tr.children[1].textContent = (ok === true ? '✔ ' : ok === false ? '✘ ' : '') + (detail || '');
     out.appendChild(tr);
     return tr;
   }
 
-  function safe(name, fn) {
-    try { fn(); } catch (e) { row(name, false, String(e && (e.name + ': ' + e.message) || e)); }
+  row('Page origin', null, location.origin);
+  row('tizen in PAGE', typeof tizen !== 'undefined', typeof tizen !== 'undefined' ? 'present' : 'absent (expected)');
+
+  var probeRow = row('Service /probe', null, 'connecting…');
+  var appsRow = row('App list (via service)', null, 'pending…');
+
+  function getJSON(url, cb, tries) {
+    tries = tries || 0;
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url);
+    xhr.timeout = 4000;
+    xhr.onload = function () {
+      try { cb(null, JSON.parse(xhr.responseText)); }
+      catch (e) { cb('bad json: ' + xhr.responseText.slice(0, 120), null); }
+    };
+    xhr.onerror = xhr.ontimeout = function () {
+      if (tries < 10) { setTimeout(function () { getJSON(url, cb, tries + 1); }, 1000); }
+      else cb('no response after retries', null);
+    };
+    xhr.send();
   }
 
-  row('Origin', null, location.origin);
-  row('User agent', null, navigator.userAgent);
-  row('window.tizen', typeof tizen !== 'undefined');
-  row('window.webapis', typeof webapis !== 'undefined');
+  getJSON(SERVICE + '/probe', function (err, data) {
+    if (err) {
+      probeRow.children[1].className = 'no';
+      probeRow.children[1].textContent = '✘ ' + err;
+      appsRow.children[1].className = 'no';
+      appsRow.children[1].textContent = '✘ service unreachable';
+      return;
+    }
+    probeRow.children[1].className = 'ok';
+    probeRow.children[1].textContent = '✔ tizenInService=' + data.tizenInService +
+      ', hasApplication=' + data.hasApplication + ', platform=' + data.platform;
 
-  safe('Platform version', function () {
-    row('Platform version', true, tizen.systeminfo.getCapability('http://tizen.org/feature/platform.version'));
-  });
-
-  safe('Model', function () {
-    row('Model', true, webapis.productinfo.getRealModel() + ' / FW ' + webapis.productinfo.getFirmware());
-  });
-
-  safe('getAppsInfo', function () {
-    var r = row('getAppsInfo', null, 'pending…');
-    tizen.application.getAppsInfo(function (apps) {
+    if (data.appsError) {
+      appsRow.children[1].className = 'no';
+      appsRow.children[1].textContent = '✘ ' + data.appsError;
+    } else {
+      var apps = data.apps || [];
       var visible = apps.filter(function (a) { return a.show; });
-      r.children[1].className = 'ok';
-      r.children[1].textContent = '✔ ' + apps.length + ' apps (' + visible.length + ' visible): ' +
-        visible.slice(0, 12).map(function (a) { return a.name + ' [' + a.id + ']'; }).join(', ');
-      var withIcon = visible.filter(function (a) { return a.iconPath; })[0];
-      row('Icon path sample', !!withIcon, withIcon ? withIcon.iconPath : 'none');
-    }, function (e) {
-      r.children[1].className = 'no';
-      r.children[1].textContent = '✘ ' + e.name + ': ' + e.message;
-    });
+      appsRow.children[1].className = 'ok';
+      appsRow.children[1].textContent = '✔ ' + apps.length + ' apps, ' + visible.length + ' visible';
+      var withIcon = 0;
+      for (var i = 0; i < visible.length && i < 20; i++) {
+        row('  ' + visible[i].name, null, visible[i].id + (visible[i].iconPath ? '  [icon]' : '  [no icon]'));
+        if (visible[i].iconPath) withIcon++;
+      }
+      row('Icons available', withIcon > 0, withIcon + ' of first 20 have an icon path');
+    }
   });
 
-  row('application.launch', typeof tizen !== 'undefined' && !!tizen.application && typeof tizen.application.launch === 'function');
-  row('tizen.tvwindow', typeof tizen !== 'undefined' && !!tizen.tvwindow);
-  row('tizen.tvinputdevice', typeof tizen !== 'undefined' && !!tizen.tvinputdevice);
-
-  safe('TV sources (tvwindow)', function () {
-    tizen.tvwindow.getAvailableWindows(function (w) {
-      row('TV windows', true, w.join(', '));
-    }, function (e) { row('TV windows', false, e.name + ': ' + e.message); });
-  });
-
-  safe('webapis.avinfo', function () {
-    row('webapis.avinfo', !!webapis.avinfo, webapis.avinfo ? 'present' : 'missing');
-  });
-
-  safe('Supported keys', function () {
-    var keys = tizen.tvinputdevice.getSupportedKeys().map(function (k) { return k.name; });
-    row('Supported keys', true, keys.join(', '));
-  });
-
-  safe('localStorage', function () {
-    localStorage.setItem('tvl-test', '1');
-    row('localStorage', localStorage.getItem('tvl-test') === '1', 'read/write');
-  });
-
-  safe('Network (Open-Meteo)', function () {
-    var r = row('Network (Open-Meteo)', null, 'pending…');
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', 'https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&current=temperature_2m');
-    xhr.onload = function () {
-      r.children[1].className = xhr.status === 200 ? 'ok' : 'no';
-      r.children[1].textContent = (xhr.status === 200 ? '✔ ' : '✘ ') + 'HTTP ' + xhr.status;
-    };
-    xhr.onerror = function () { r.children[1].className = 'no'; r.children[1].textContent = '✘ request failed'; };
-    xhr.send();
-  });
-
-  var launchRow = null;
   document.addEventListener('keydown', function (e) {
     document.getElementById('keys').textContent = 'Last key: ' + e.keyCode + ' (' + (e.key || '') + ')';
-    if (e.keyCode === 13) {
-      if (!launchRow) launchRow = row('Launch YouTube', null, 'trying…');
-      try {
-        tizen.application.launch('111299001912', function () {
-          launchRow.children[1].className = 'ok';
-          launchRow.children[1].textContent = '✔ launched';
-        }, function (err) {
-          launchRow.children[1].className = 'no';
-          launchRow.children[1].textContent = '✘ ' + err.name + ': ' + err.message;
-        });
-      } catch (err) {
-        launchRow.children[1].className = 'no';
-        launchRow.children[1].textContent = '✘ ' + err.message;
-      }
+    if (e.keyCode === 13) { // OK: ask service to launch YouTube
+      var r = row('Launch YouTube (via service)', null, 'trying…');
+      getJSON(SERVICE + '/launch?id=' + YT_ID, function (err, data) {
+        if (err || !data) { r.children[1].className = 'no'; r.children[1].textContent = '✘ ' + err; return; }
+        r.children[1].className = data.ok ? 'ok' : 'no';
+        r.children[1].textContent = (data.ok ? '✔ launched ' : '✘ ') + (data.error || data.id || '');
+      });
     }
-    if (e.keyCode === 10009) history.back();
+    if (e.keyCode === 10009) history.back(); // Return
   });
 })();
